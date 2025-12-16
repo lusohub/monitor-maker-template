@@ -10,7 +10,7 @@ env:
   REGISTRY_REPOSITORY: ${{ secrets.REGISTRY_REPOSITORY }}
   GKE_CLUSTER: ${{ secrets.GKE_CLUSTER }}
   GKE_ZONE: europe-west1
-  APP_NAME: memes-maker
+  APP_NAME: monitoring-maker
 
 jobs:
   build-push-deploy:
