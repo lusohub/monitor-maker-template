@@ -9,7 +9,7 @@ projectId: ""
 
 serviceAccount:
   create: true
-  name: "meme-maker-sa"
+  name: "monitoring-maker-sa"
   gcpServiceAccount: "terraform-sa"
   annotations: {}
 
