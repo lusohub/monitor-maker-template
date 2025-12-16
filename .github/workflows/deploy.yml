@@ -1,0 +1,73 @@
+name: Build, Push, and Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGISTRY_LOCATION: europe-west1
+  REGISTRY_REPOSITORY: ${{ secrets.REGISTRY_REPOSITORY }}
+  GKE_CLUSTER: ${{ secrets.GKE_CLUSTER }}
+  GKE_ZONE: europe-west1
+  APP_NAME: memes-maker
+
+jobs:
+  build-push-deploy:
+    name: Build, Push, and Deploy
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        lfs: true
+
+    - name: Google Auth
+      id: auth
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+    - name: Docker Auth
+      run: |-
+        gcloud auth configure-docker ${{ env.REGISTRY_LOCATION }}-docker.pkg.dev
+
+    - name: Build and Push Docker Image
+      run: |-
+        docker build -t "${{ env.REGISTRY_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REGISTRY_REPOSITORY }}/${{ env.APP_NAME }}:${{ github.sha }}" .
+        docker push "${{ env.REGISTRY_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REGISTRY_REPOSITORY }}/${{ env.APP_NAME }}:${{ github.sha }}"
+
+    - name: Get GKE Credentials
+      uses: google-github-actions/get-gke-credentials@v2
+      with:
+        cluster_name: ${{ env.GKE_CLUSTER }}
+        location: ${{ env.GKE_ZONE }}
+
+    - name: Install Helm
+      uses: azure/setup-helm@v4.2.0
+
+    - name: Get Secrets from GCP
+      id: secrets
+      run: |-
+        echo "redis_host=$(gcloud secrets versions access latest --secret=redis-host --project=${{ env.PROJECT_ID }})" >> $GITHUB_OUTPUT
+        echo "redis_port=$(gcloud secrets versions access latest --secret=redis-port --project=${{ env.PROJECT_ID }})" >> $GITHUB_OUTPUT
+        echo "redis_auth_string=$(gcloud secrets versions access latest --secret=redis-auth-string --project=${{ env.PROJECT_ID }})" >> $GITHUB_OUTPUT
+
+    - name: Deploy to GKE
+      run: |-
+        helm upgrade --install ${{ env.APP_NAME }} ./etc/chart \
+          --set image.repository=${{ env.REGISTRY_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REGISTRY_REPOSITORY }}/${{ env.APP_NAME }} \
+          --set image.tag=${{ github.sha }} \
+          --set projectId=${{ env.PROJECT_ID }} \
+          --set secrets.discord_url=${{ secrets.DISCORD_URL }} \
+          --set secrets.gcp_project_id=${{ secrets.GCP_PROJECT_ID }} \
+          --set secrets.pubsub_subscription_id=${{ secrets.PUBSUB_SUBSCRIPTION_ID }} \
+          --set secrets.redis_host=${{ steps.secrets.outputs.redis_host }} \
+          --set secrets.redis_port=${{ steps.secrets.outputs.redis_port }} \
+          --set secrets.redis_auth_string=${{ steps.secrets.outputs.redis_auth_string }} \
+          --wait
